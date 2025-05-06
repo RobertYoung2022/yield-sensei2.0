@@ -1,28 +1,26 @@
 # tools/security.py
 import requests
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, ClassVar
+from pydantic import PrivateAttr
 from langchain.tools import BaseTool
 
 class SecurityAnalysisTool(BaseTool):
     """Tool for analyzing the security posture of DeFi protocols"""
-    
-    name = "security_analysis_tool"
-    description = """
+    name: ClassVar[str] = "security_analysis_tool"
+    description: ClassVar[str] = """
     Use this tool to check the security status of DeFi protocols.
     This tool can check audit status, look for security incidents,
     and evaluate TVL stability as a security indicator.
     """
-    
+    _defillama_url: str = PrivateAttr("https://api.llama.fi")
+    _certik_url: str = PrivateAttr("https://raw.githubusercontent.com/SCV-Security/PublicReports/main/CERTIKsecurity.json")
+    _audit_data: dict = PrivateAttr()
+
     def __init__(self):
         """Initialize the Security Analysis tool"""
         super().__init__()
-        self.defillama_url = "https://api.llama.fi"
-        self.certik_url = "https://raw.githubusercontent.com/SCV-Security/PublicReports/main/CERTIKsecurity.json"
-        
-        # In a real implementation, you would use actual APIs for these services
-        # For this MVP, we'll simulate some audit data
-        self.audit_data = self._load_audit_data()
+        self._audit_data = self._load_audit_data()
     
     def _load_audit_data(self) -> Dict:
         """Load simulated audit data for protocols"""
@@ -93,7 +91,7 @@ class SecurityAnalysisTool(BaseTool):
         
         if "audit" in query or "security" in query:
             # Check if we're querying about a specific protocol
-            for protocol in self.audit_data.keys():
+            for protocol in self._audit_data.keys():
                 if protocol in query:
                     return self.get_protocol_security_info(protocol)
             
@@ -102,7 +100,7 @@ class SecurityAnalysisTool(BaseTool):
         
         elif "tvl" in query and "stability" in query:
             # Extract protocol name from query if present
-            for protocol in self.audit_data.keys():
+            for protocol in self._audit_data.keys():
                 if protocol in query:
                     return self.check_tvl_stability(protocol)
             
@@ -111,7 +109,7 @@ class SecurityAnalysisTool(BaseTool):
         
         elif "risk" in query or "rating" in query:
             # Extract protocol name from query if present
-            for protocol in self.audit_data.keys():
+            for protocol in self._audit_data.keys():
                 if protocol in query:
                     return self.get_risk_rating(protocol)
             
@@ -132,8 +130,8 @@ class SecurityAnalysisTool(BaseTool):
         """Get security information for a specific protocol"""
         protocol_name = protocol_name.lower()
         
-        if protocol_name in self.audit_data:
-            data = self.audit_data[protocol_name]
+        if protocol_name in self._audit_data:
+            data = self._audit_data[protocol_name]
             
             result = {
                 "protocol": protocol_name,
@@ -152,7 +150,7 @@ class SecurityAnalysisTool(BaseTool):
         # If protocol not in our database, try to fetch from DeFiLlama for audit links
         try:
             # Get all protocols first to find the matching slug
-            response = requests.get(f"{self.defillama_url}/protocols")
+            response = requests.get(f"{self._defillama_url}/protocols")
             data = response.json()
             
             matching_protocols = [
@@ -186,7 +184,7 @@ class SecurityAnalysisTool(BaseTool):
             protocol_name = protocol_name.lower()
             
             # Get all protocols first to find the matching slug
-            response = requests.get(f"{self.defillama_url}/protocols")
+            response = requests.get(f"{self._defillama_url}/protocols")
             data = response.json()
             
             matching_protocols = [
@@ -204,11 +202,11 @@ class SecurityAnalysisTool(BaseTool):
                 return f"Could not find protocol slug for '{protocol_name}'"
             
             # Get TVL history
-            detail_response = requests.get(f"{self.defillama_url}/protocol/{protocol_slug}")
+            detail_response = requests.get(f"{self._defillama_url}/protocol/{protocol_slug}")
             detail_data = detail_response.json()
             
             # Get 30-day TVL chart for stability analysis
-            tvl_chart = detail_data.get('tvl', {}).get('chart', {})
+            tvl_chart = detail_data.get('chainTvls', {})
             if not tvl_chart:
                 return f"Could not retrieve TVL history for '{protocol_name}'"
             
@@ -217,14 +215,18 @@ class SecurityAnalysisTool(BaseTool):
             # For the MVP, we'll do a simple volatility check
             
             # Extract the most recent 30 days of data if available
-            recent_tvl = tvl_chart[-30:] if len(tvl_chart) >= 30 else tvl_chart
+            all_tvl = []
+            for chain, chain_data in tvl_chart.items():
+                tvl_list = chain_data.get('tvl', [])
+                if isinstance(tvl_list, list):
+                    all_tvl.extend([entry.get('totalLiquidityUSD', 0) for entry in tvl_list if isinstance(entry, dict)])
+            recent_tvl = all_tvl[-30:] if len(all_tvl) >= 30 else all_tvl
             
             # Calculate basic stability metrics
             if len(recent_tvl) > 1:
-                tvl_values = [entry[1] for entry in recent_tvl]  # TVL values
-                max_tvl = max(tvl_values)
-                min_tvl = min(tvl_values)
-                avg_tvl = sum(tvl_values) / len(tvl_values)
+                max_tvl = max(recent_tvl)
+                min_tvl = min(recent_tvl)
+                avg_tvl = sum(recent_tvl) / len(recent_tvl)
                 
                 # Calculate volatility as a percentage of average TVL
                 volatility = (max_tvl - min_tvl) / avg_tvl * 100
@@ -235,6 +237,47 @@ class SecurityAnalysisTool(BaseTool):
                 result = {
                     "protocol": protocol.get('name', protocol_name),
                     "tvl_stability": {
-                        "current_tvl": tvl_values[-1],
+                        "current_tvl": recent_tvl[-1],
                         "30d_avg_tvl": avg_tvl,
                         "30d_volatility_pct": volatility,
+                        "stability_rating": stability_rating
+                    }
+                }
+                
+                return json.dumps(result, indent=2)
+            else:
+                return f"Not enough TVL data to analyze stability for '{protocol_name}'"
+        
+        except Exception as e:
+            return f"Error checking TVL stability for {protocol_name}: {str(e)}"
+    
+    def get_risk_rating(self, protocol_name: str) -> str:
+        """Get risk rating for a specific protocol"""
+        protocol_name = protocol_name.lower()
+        if protocol_name in self._audit_data:
+            data = self._audit_data[protocol_name]
+            result = {
+                "protocol": protocol_name,
+                "risk_rating": data["risk_level"]
+            }
+            return json.dumps(result, indent=2)
+        else:
+            return f"No risk rating found for '{protocol_name}'"
+    
+    def get_all_risk_ratings(self) -> str:
+        """Get risk ratings for all protocols"""
+        result = {
+            protocol: data["risk_level"] for protocol, data in self._audit_data.items()
+        }
+        return json.dumps({"all_risk_ratings": result}, indent=2)
+    
+    def get_general_security_overview(self) -> str:
+        """Get a general security overview for all protocols"""
+        overview = {
+            protocol: {
+                "audited": data["audited"],
+                "risk_level": data["risk_level"],
+                "last_audit_date": data["last_audit_date"]
+            } for protocol, data in self._audit_data.items()
+        }
+        return json.dumps({"security_overview": overview}, indent=2)
