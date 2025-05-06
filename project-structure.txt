@@ -1,0 +1,38 @@
+```
+yieldsensei/
+├── agents/
+│   ├── __init__.py
+│   ├── sage.py        # Research & Market Analysis
+│   ├── pulse.py       # Yield/Strategy Seeker
+│   ├── aegis.py       # Risk & Audit Watch
+│   ├── echo.py        # Sentiment Analysis
+│   ├── fuel.py        # Capital Tracking
+│   └── prompts/       # Agent-specific prompts
+│       ├── sage_prompts.py
+│       ├── pulse_prompts.py
+│       ├── aegis_prompts.py
+│       ├── echo_prompts.py
+│       └── fuel_prompts.py
+├── tools/
+│   ├── __init__.py
+│   ├── defillama.py   # DeFiLlama API integration
+│   ├── certik.py      # Security audit data
+│   ├── etherscan.py   # On-chain activity
+│   ├── twitter.py     # Social sentiment
+│   └── dune.py        # Analytics queries
+├── core/
+│   ├── __init__.py
+│   ├── crew.py        # CrewAI orchestration
+│   ├── memory.py      # Vector store for context
+│   └── config.py      # System configuration
+├── ui/
+│   ├── __init__.py
+│   ├── cli.py         # Command-line interface
+│   └── streamlit_app.py  # Optional Streamlit dashboard
+├── data/
+│   ├── portfolio.json  # User portfolio tracking
+│   └── suggestions.json  # Historical suggestions
+├── requirements.txt
+├── main.py            # Application entry point
+└── README.md
+```
